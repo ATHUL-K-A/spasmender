@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Muscle Strength Tester</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <div class="container">
+        <h1>Muscle Strength Tester</h1>
+        
+        <div class="card">
+            <div class="input-group">
+                <label for="muscle-select">Select Muscle to Test:</label>
+                <select id="muscle-select">
+                    </select>
+            </div>
+
+            <div class="info-box">
+                <p><strong>Test Type:</strong> <span id="test-type-display">--</span></p>
+                <p><strong>Standard Value:</strong> <span id="standard-value-display">--</span></p>
+            </div>
+
+            <div class="input-group">
+                <label for="measured-value">Enter Your Measured Value:</label>
+                <input type="number" id="measured-value" placeholder="e.g., 32.5">
+            </div>
+
+            <button id="check-button">Check Value</button>
+        </div>
+        
+        <div id="result-message">
+            </div>
+
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

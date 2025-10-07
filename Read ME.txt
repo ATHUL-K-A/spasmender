@@ -1,0 +1,21 @@
+This is the data used in paper "Upper Limb Muscle Fatigue Analysis Using Multi-channel Surface EMG" DOI: 10.1109/NILES50944.2020.9257909
+
+Data can be found as a txt files for each subject separately
+or can be found as .mat file with all subjects included.
+
+Data details:
+
+Sampling Frequency= 200 Hz 
+8-Bit resolution
+15 Healthy Subjects 
+6 Kg Load with elbow flexed to a 90 angle
+120 Seconds Duration
+8 channels sEMG 
+50 Hz Notch Filtered
+
+For more details and citation:
+
+A. Ebied, A. M. Awadallah, M. A. Abbass and Y. El-Sharkawy, 
+"Upper Limb Muscle Fatigue Analysis Using Multi-channel Surface EMG," 
+2020 2nd Novel Intelligent and Leading Emerging Sciences Conference (NILES), 2020,
+pp. 423-427, doi: 10.1109/NILES50944.2020.9257909.
