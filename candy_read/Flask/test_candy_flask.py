@@ -17,7 +17,7 @@ BAUD = 115200
 FS = 200
 WINDOW = 200
 
-CSV_FILE = r"D:\Project\Dataset EMG Fatigue\candy_read\data\combined_BR50.csv"
+CSV_FILE = r"\candy_read\data\combined_BR50.csv"
 
 app = Flask(__name__)
 
