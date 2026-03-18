@@ -8,7 +8,7 @@ from sklearn.linear_model import LinearRegression
 from collections import deque
 from flask import Flask, jsonify
 from flask_cors import CORS
-
+ser_global = None
 # -------------------------------------------------
 # PARAMETERS
 # -------------------------------------------------
@@ -76,7 +76,10 @@ def emg_thread():
     global state
 
     try:
-        ser = serial.Serial(PORT, BAUD, timeout=1)
+        global ser_global
+        ser_global = serial.Serial(PORT, BAUD, timeout=1)
+        time.sleep(2)
+        ser = ser_global
         time.sleep(2)
         print("Serial connected.")
     except Exception as e:
@@ -87,10 +90,10 @@ def emg_thread():
     env_buffer = deque(maxlen=WINDOW)
 
     fatigue_counter = 0
+    t1=0
 
-    while not stop_event.is_set():
+    while not stop_event.is_set():        
         line = ser.readline().decode(errors="ignore").strip()
-
         if "," not in line:
             continue
 
@@ -113,10 +116,15 @@ def emg_thread():
         if fatigued:
             fatigue_counter += 1
             print(f"Fatigue Counter: {fatigue_counter} | RMS: {live_rms:.4f} | MDF: {live_mdf:.4f}")
-        else:
-            fatigue_counter = 0
+            t1+=1
+        if t1:
+            t1+=1            
+        if t1>=2000:
+            print("Fatigue Counter restarted as 10 seconds has passedd from first detection")
+            fatigue_counter=0
+            t1=0
 
-        fatigue_detected = fatigue_counter >= 600
+        fatigue_detected = fatigue_counter >= 600 
 
         with state_lock:
             state["live_rms"] = round(float(live_rms), 4)
@@ -128,6 +136,7 @@ def emg_thread():
         if fatigue_detected:
             print("⚠️ FATIGUE DETECTED")
             fatigue_counter = 0
+            t1=0
             stop_event.set()
 
     ser.close()
@@ -170,7 +179,21 @@ def stop():
 def status():
     with state_lock:
         return jsonify(state)
+@app.route("/set_channel/<int:ch>", methods=["GET"])
+def set_channel(ch):
+    global ser_global
 
+    if ch < 0 or ch > 3:
+        return jsonify({"error": "Invalid channel"}), 400
+
+    if ser_global is None:
+        return jsonify({"error": "Serial not initialized"}), 500
+
+    try:
+        ser_global.write(f"{ch}\n".encode())
+        return jsonify({"message": f"Channel set to {ch}"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 # -------------------------------------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=False, use_reloader=False)
