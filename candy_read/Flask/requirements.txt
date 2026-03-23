@@ -1,0 +1,5 @@
+flask
+pyserial
+numpy
+pandas
+scipy
