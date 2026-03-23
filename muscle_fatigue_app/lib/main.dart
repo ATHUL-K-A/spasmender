@@ -1,8 +1,8 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:http/http.dart' as http;
+import 'package:socket_io_client/socket_io_client.dart' as IO;
 
 void main() {
   runApp(const MyApp());
@@ -13,9 +13,13 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const MaterialApp(
+    return MaterialApp(
       debugShowCheckedModeBanner: false,
-      home: MainScreen(),
+      theme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
+        useMaterial3: true,
+      ),
+      home: const MainScreen(),
     );
   }
 }
@@ -28,6 +32,9 @@ class MainScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         title: const Text("Muscle Fatigue Monitor"),
+        centerTitle: true,
+        backgroundColor: Colors.indigo,
+        foregroundColor: Colors.white,
       ),
       body: const ReadFatigueScreen(),
     );
@@ -42,309 +49,446 @@ class ReadFatigueScreen extends StatefulWidget {
 }
 
 class _ReadFatigueScreenState extends State<ReadFatigueScreen> {
-  final String baseUrl = "http://192.168.1.167:5000";
+  final String baseUrl = "http://127.0.0.1:5000";
+  final String socketUrl = "http://127.0.0.1:5000";
 
-  Timer? timer;
+  IO.Socket? socket;
   bool monitoring = false;
+  bool socketConnected = false;
   String statusText = "STOPPED";
-
   int selectedSensor = 0;
 
+  // RMS / MDF graphs — updated from status_update
   List<FlSpot> rmsSpots = [];
   List<FlSpot> mdfSpots = [];
+  double statusTimeIndex = 0;
 
-  double timeIndex = 0;
+  double liveRms = 0;
+  double liveMdf = 0;
+  int fatigueCounter = 0;
 
-  // ---------------- SENSOR SWITCH ----------------
-  Future<void> setSensor(int sensorIndex) async {
+  // ----------------------------------------------------------------
+  // SOCKET SETUP
+  // ----------------------------------------------------------------
+  void connectSocket() {
+    socket = IO.io(socketUrl, <String, dynamic>{
+      "transports": ["websocket"],
+      "autoConnect": true,
+    });
+
+    socket!.onConnect((_) {
+      setState(() => socketConnected = true);
+      print("Socket connected");
+    });
+
+    socket!.onDisconnect((_) {
+      setState(() => socketConnected = false);
+      print("Socket disconnected");
+    });
+
+    // Status update → update RMS/MDF graphs and status text
+    socket!.on("status_update", (data) {
+      double rms = (data["live_rms"] as num).toDouble();
+      double mdf = (data["live_mdf"] as num).toDouble();
+      int fc = (data["fatigue_counter"] as num).toInt();
+      String status = data["status"] ?? "UNKNOWN";
+
+      setState(() {
+        liveRms = rms;
+        liveMdf = mdf;
+        fatigueCounter = fc;
+        statusText = status;
+
+        if (rms > 0 || mdf > 0) {
+          rmsSpots.add(FlSpot(statusTimeIndex, rms));
+          mdfSpots.add(FlSpot(statusTimeIndex, mdf));
+          statusTimeIndex += 1;
+        }
+      });
+    });
+
+    // Fatigue alert → show dialog + auto-stop
+    socket!.on("fatigue_alert", (data) {
+      stopMonitoring();
+      if (mounted) {
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) => AlertDialog(
+            icon: const Icon(Icons.warning_amber_rounded,
+                color: Colors.red, size: 48),
+            title: const Text("⚠️ Fatigue Detected",
+                textAlign: TextAlign.center),
+            content: const Text(
+              "Sustained muscle fatigue has been detected.\nPlease rest.",
+              textAlign: TextAlign.center,
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text("OK"),
+              )
+            ],
+          ),
+        );
+      }
+    });
+
+    socket!.connect();
+  }
+
+  // ----------------------------------------------------------------
+  // START / STOP
+  // ----------------------------------------------------------------
+  Future<void> startMonitoring() async {
     try {
-      await http.get(Uri.parse("$baseUrl/set_channel/$sensorIndex"));
+      final res = await http.get(Uri.parse("$baseUrl/start"));
+      if (res.statusCode == 200) {
+        setState(() {
+          monitoring = true;
+          rmsSpots.clear();
+          mdfSpots.clear();
+          statusTimeIndex = 0;
+          liveRms = 0;
+          liveMdf = 0;
+          fatigueCounter = 0;
+          statusText = "RUNNING";
+        });
+      }
     } catch (e) {
-      print("Error setting sensor: $e");
+      print("Start error: $e");
     }
   }
 
-  // ---------------- START ----------------
-  Future<void> startMonitoring() async {
-    await http.get(Uri.parse("$baseUrl/start"));
-
+  Future<void> stopMonitoring() async {
+    try {
+      await http.get(Uri.parse("$baseUrl/stop"));
+    } catch (e) {
+      print("Stop error: $e");
+    }
     setState(() {
-      monitoring = true;
-      rmsSpots.clear();
-      mdfSpots.clear();
-      timeIndex = 0;
-    });
-
-    timer = Timer.periodic(const Duration(seconds: 1), (_) async {
-      final response = await http.get(Uri.parse("$baseUrl/status"));
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-
-        double rms = (data["live_rms"] ?? 0).toDouble();
-        double mdf = (data["live_mdf"] ?? 0).toDouble();
-        bool fatigueDetected = data["fatigue_detected"] ?? false;
-        String backendStatus = data["status"] ?? "UNKNOWN";
-
-        setState(() {
-          rmsSpots.add(FlSpot(timeIndex, rms));
-          mdfSpots.add(FlSpot(timeIndex, mdf));
-          statusText = backendStatus;
-          timeIndex += 1;
-        });
-
-        if (fatigueDetected) {
-          stopMonitoring();
-
-          showDialog(
-            context: context,
-            builder: (_) => const AlertDialog(
-              title: Text("⚠️ FATIGUE DETECTED"),
-              content: Text("Sustained fatigue detected."),
-            ),
-          );
-        }
-      }
+      monitoring = false;
+      statusText = "STOPPED";
     });
   }
 
-  // ---------------- STOP ----------------
-  Future<void> stopMonitoring() async {
-    await http.get(Uri.parse("$baseUrl/stop"));
-    timer?.cancel();
+  // ----------------------------------------------------------------
+  // CHANNEL SWITCH
+  // ----------------------------------------------------------------
+  Future<void> setSensor(int ch) async {
+    try {
+      await http.get(Uri.parse("$baseUrl/set_channel/$ch"));
+      setState(() {
+        rmsSpots.clear();
+        mdfSpots.clear();
+        statusTimeIndex = 0;
+      });
+    } catch (e) {
+      print("Set sensor error: $e");
+    }
+  }
 
-    setState(() {
-      monitoring = false;
-    });
+  // ----------------------------------------------------------------
+  // LIFECYCLE
+  // ----------------------------------------------------------------
+  @override
+  void initState() {
+    super.initState();
+    connectSocket();
   }
 
   @override
   void dispose() {
-    timer?.cancel();
+    socket?.dispose();
     super.dispose();
   }
 
-  // ---------------- GRAPH ----------------
-  Widget buildGraph(
-      String title, List<FlSpot> spots, Color color, double maxY) {
-    return Expanded(
-      child: Column(
-        children: [
-          Text(title,
-              style:
-                  const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-          Expanded(
-            child: spots.isEmpty
-                ? const Center(child: Text("No data yet..."))
-                : LineChart(
-                    LineChartData(
-                      minX: 0,
-                      maxX: timeIndex < 10 ? 10 : timeIndex + 5,
-                      minY: 0,
-                      maxY: maxY,
-                      lineBarsData: [
-                        LineChartBarData(
-                          spots: spots,
-                          isCurved: true,
-                          color: color,
-                          dotData: const FlDotData(show: false),
+  // ----------------------------------------------------------------
+  // GRAPH BUILDERS
+  // ----------------------------------------------------------------
+
+  // RMS over time
+  Widget buildRMSGraph() {
+    return _graphCard(
+      title: "RMS over Time",
+      color: Colors.blue,
+      spots: rmsSpots,
+      minX: 0,
+      maxX: statusTimeIndex < 10 ? 10 : statusTimeIndex + 5,
+      minY: 0,
+      maxY: 900,
+      yInterval: 100,
+    );
+  }
+
+  // MDF over time
+  Widget buildMDFGraph() {
+    return _graphCard(
+      title: "MDF (Hz) over Time",
+      color: Colors.orange,
+      spots: mdfSpots,
+      minX: 0,
+      maxX: statusTimeIndex < 10 ? 10 : statusTimeIndex + 5,
+      minY: 0,
+      maxY: 100,
+      yInterval: 10,
+    );
+  }
+
+  Widget _graphCard({
+    required String title,
+    required Color color,
+    required List<FlSpot> spots,
+    required double minX,
+    required double maxX,
+    required double minY,
+    required double maxY,
+    required double yInterval,
+  }) {
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 6),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title,
+                style: const TextStyle(
+                    fontSize: 14, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            SizedBox(
+              height: 180,
+              child: spots.isEmpty
+                  ? const Center(
+                      child: Text("Waiting for data...",
+                          style: TextStyle(color: Colors.grey)))
+                  : LineChart(
+                      LineChartData(
+                        minX: minX,
+                        maxX: maxX,
+                        minY: minY,
+                        maxY: maxY,
+                        gridData: FlGridData(
+                          show: true,
+                          horizontalInterval: yInterval,
+                          drawVerticalLine: false,
+                          getDrawingHorizontalLine: (_) => FlLine(
+                            color: Colors.grey.withOpacity(0.25),
+                            strokeWidth: 1,
+                          ),
                         ),
-                      ],
+                        borderData: FlBorderData(
+                          show: true,
+                          border: Border(
+                            left: BorderSide(color: Colors.grey.shade400),
+                            bottom: BorderSide(color: Colors.grey.shade400),
+                          ),
+                        ),
+                        titlesData: FlTitlesData(
+                          topTitles: const AxisTitles(
+                              sideTitles: SideTitles(showTitles: false)),
+                          rightTitles: const AxisTitles(
+                              sideTitles: SideTitles(showTitles: false)),
+                          bottomTitles: const AxisTitles(
+                              sideTitles: SideTitles(showTitles: false)),
+                          leftTitles: AxisTitles(
+                            sideTitles: SideTitles(
+                              showTitles: true,
+                              interval: yInterval,
+                              reservedSize: 36,
+                              getTitlesWidget: (value, meta) {
+                                if (value < minY || value > maxY) {
+                                  return const SizedBox.shrink();
+                                }
+                                return Text(
+                                  value.toInt().toString(),
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    color: Colors.grey.shade600,
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                        ),
+                        lineBarsData: [
+                          LineChartBarData(
+                            spots: spots,
+                            isCurved: false,
+                            color: color,
+                            barWidth: 1.5,
+                            dotData: const FlDotData(show: false),
+                            belowBarData: BarAreaData(
+                              show: true,
+                              color: color.withOpacity(0.08),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ----------------------------------------------------------------
+  // STATUS CHIP
+  // ----------------------------------------------------------------
+  Color get statusColor {
+    switch (statusText) {
+      case "RUNNING":
+        return Colors.green;
+      case "FATIGUED":
+        return Colors.orange;
+      case "STOPPED":
+        return Colors.grey;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  // ----------------------------------------------------------------
+  // UI
+  // ----------------------------------------------------------------
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // --- Status row ---
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Chip(
+                label: Text(
+                  statusText,
+                  style: const TextStyle(
+                      color: Colors.white, fontWeight: FontWeight.bold),
+                ),
+                backgroundColor: statusColor,
+              ),
+              Row(
+                children: [
+                  Icon(
+                    socketConnected ? Icons.wifi : Icons.wifi_off,
+                    color: socketConnected ? Colors.green : Colors.red,
+                    size: 18,
                   ),
+                  const SizedBox(width: 4),
+                  Text(socketConnected ? "Connected" : "Disconnected",
+                      style: TextStyle(
+                          color: socketConnected ? Colors.green : Colors.red,
+                          fontSize: 13)),
+                ],
+              ),
+            ],
           ),
+
+          const SizedBox(height: 8),
+
+          // --- Live metrics row ---
+          Row(
+            children: [
+              _metricCard("RMS", liveRms.toStringAsFixed(3), Colors.blue),
+              const SizedBox(width: 8),
+              _metricCard("MDF (Hz)", liveMdf.toStringAsFixed(1), Colors.orange),
+              const SizedBox(width: 8),
+              _metricCard("Fatigue #", fatigueCounter.toString(), Colors.red),
+            ],
+          ),
+
+          const SizedBox(height: 8),
+
+          // --- Sensor selector ---
+          Row(
+            children: [
+              const Text("Sensor: ",
+                  style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(width: 8),
+              DropdownButton<int>(
+                value: selectedSensor,
+                items: List.generate(
+                  4,
+                  (i) => DropdownMenuItem(
+                      value: i, child: Text("Sensor ${i + 1}")),
+                ),
+                onChanged: monitoring
+                    ? (value) {
+                        if (value != null) {
+                          setState(() => selectedSensor = value);
+                          setSensor(value);
+                        }
+                      }
+                    : null,
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 8),
+
+          // --- Control buttons ---
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: monitoring ? null : startMonitoring,
+                  icon: const Icon(Icons.play_arrow),
+                  label: const Text("Start"),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green,
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: monitoring ? stopMonitoring : null,
+                  icon: const Icon(Icons.stop),
+                  label: const Text("Stop"),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red,
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 16),
+
+          // --- Graphs ---
+          buildRMSGraph(),
+          buildMDFGraph(),
         ],
       ),
     );
   }
 
-  // ---------------- UI ----------------
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        children: [
-          Text("Status: $statusText",
-              style:
-                  const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-
-          const SizedBox(height: 10),
-
-          if (monitoring) const CircularProgressIndicator(),
-
-          const SizedBox(height: 20),
-
-          // 🔽 SENSOR DROPDOWN
-          DropdownButton<int>(
-            value: selectedSensor,
-            items: const [
-              DropdownMenuItem(value: 0, child: Text("Sensor 1")),
-              DropdownMenuItem(value: 1, child: Text("Sensor 2")),
-              DropdownMenuItem(value: 2, child: Text("Sensor 3")),
-              DropdownMenuItem(value: 3, child: Text("Sensor 4")),
+  Widget _metricCard(String label, String value, Color color) {
+    return Expanded(
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
+          child: Column(
+            children: [
+              Text(label,
+                  style: TextStyle(
+                      fontSize: 11, color: color, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 4),
+              Text(value,
+                  style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      color: color)),
             ],
-            onChanged: (value) {
-              if (value != null) {
-                setState(() {
-                  selectedSensor = value;
-
-                  // reset graph when switching sensor
-                  rmsSpots.clear();
-                  mdfSpots.clear();
-                  timeIndex = 0;
-                });
-
-                setSensor(value);
-              }
-            },
           ),
-
-          const SizedBox(height: 20),
-
-          ElevatedButton(
-            onPressed: monitoring ? null : startMonitoring,
-            child: const Text("Start"),
-          ),
-
-          const SizedBox(height: 10),
-
-          ElevatedButton(
-            onPressed: monitoring ? stopMonitoring : null,
-            child: const Text("Stop"),
-          ),
-
-          const SizedBox(height: 20),
-
-          buildGraph("Live RMS", rmsSpots, Colors.blue, 700),
-
-          const SizedBox(height: 10),
-
-          buildGraph("Live MDF (Hz)", mdfSpots, Colors.orange, 100),
-        ],
+        ),
       ),
     );
   }
 }
-
-//////////////////////////////////////////////////////////////
-// PAST RECORDS SCREEN
-//////////////////////////////////////////////////////////////
-
-// class PastRecordsScreen extends StatefulWidget {
-//   const PastRecordsScreen({super.key});
-
-//   @override
-//   State<PastRecordsScreen> createState() => _PastRecordsScreenState();
-// }
-
-// class _PastRecordsScreenState extends State<PastRecordsScreen> {
-//   String selectedSensor = "Sensor 1";
-
-//   List<FlSpot> rawSpots = [];
-//   List<FlSpot> envSpots = [];
-
-//   double avgRaw = 0;
-//   double avgEnv = 0;
-//   double maxRaw = 0;
-//   double maxEnv = 0;
-//   double duration = 0;
-
-//   Future<void> loadSensorData() async {
-//     final file = await getSensorFile(selectedSensor);
-//     if (!(await file.exists())) return;
-
-//     final lines = await file.readAsLines();
-//     if (lines.length <= 1) return;
-
-//     rawSpots.clear();
-//     envSpots.clear();
-
-//     double sumRaw = 0;
-//     double sumEnv = 0;
-//     maxRaw = 0;
-//     maxEnv = 0;
-
-//     for (int i = 1; i < lines.length; i++) {
-//       final parts = lines[i].split(',');
-//       if (parts.length != 3) continue;
-
-//       double time = double.tryParse(parts[0]) ?? 0;
-//       double raw = double.tryParse(parts[1]) ?? 0;
-//       double env = double.tryParse(parts[2]) ?? 0;
-
-//       rawSpots.add(FlSpot(time, raw));
-//       envSpots.add(FlSpot(time, env));
-
-//       sumRaw += raw;
-//       sumEnv += env;
-
-//       if (raw > maxRaw) maxRaw = raw;
-//       if (env > maxEnv) maxEnv = env;
-
-//       duration = time;
-//     }
-
-//     avgRaw = rawSpots.isNotEmpty ? sumRaw / rawSpots.length : 0;
-//     avgEnv = envSpots.isNotEmpty ? sumEnv / envSpots.length : 0;
-
-//     setState(() {});
-//   }
-
-//   @override
-//   void initState() {
-//     super.initState();
-//     loadSensorData();
-//   }
-
-//   @override
-//   Widget build(BuildContext context) {
-//     return Padding(
-//       padding: const EdgeInsets.all(16),
-//       child: Column(
-//         children: [
-//           DropdownButtonFormField(
-//             value: selectedSensor,
-//             items: ["Sensor 1", "Sensor 2", "Sensor 3", "Sensor 4"]
-//                 .map((sensor) =>
-//                     DropdownMenuItem(value: sensor, child: Text(sensor)))
-//                 .toList(),
-//             onChanged: (value) {
-//               selectedSensor = value!;
-//               loadSensorData();
-//             },
-//             decoration:
-//                 const InputDecoration(border: OutlineInputBorder()),
-//           ),
-//           const SizedBox(height: 20),
-//           Expanded(
-//             child: LineChart(
-//               LineChartData(
-//                 lineBarsData: [
-//                   LineChartBarData(
-//                     spots: rawSpots,
-//                     color: Colors.blue,
-//                     isCurved: true,
-//                     dotData: const FlDotData(show: false),
-//                   ),
-//                   LineChartBarData(
-//                     spots: envSpots,
-//                     color: Colors.orange,
-//                     isCurved: true,
-//                     dotData: const FlDotData(show: false),
-//                   ),
-//                 ],
-//               ),
-//             ),
-//           ),
-//           const SizedBox(height: 10),
-//           Text("Duration: ${duration.toStringAsFixed(2)} s"),
-//           Text("Avg Raw: ${avgRaw.toStringAsFixed(3)}"),
-//           Text("Avg Env: ${avgEnv.toStringAsFixed(3)}"),
-//           Text("Max Raw: ${maxRaw.toStringAsFixed(3)}"),
-//           Text("Max Env: ${maxEnv.toStringAsFixed(3)}"),
-//         ],
-//       ),
-//     );
-//   }
-// }

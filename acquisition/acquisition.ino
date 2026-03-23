@@ -1,141 +1,179 @@
 // EMG Envelop - Muscle BioAmp Candy
-// https://github.com/upsidedownlabs/Muscle-BioAmp-Candy
+// ESP32 as HTTP server — Flask polls /data from ESP32's IP
 
-// Upside Down Labs invests time and resources providing this open source code,
-// please support Upside Down Labs and open-source hardware by purchasing
-// products from Upside Down Labs!
+#include <WiFi.h>
+#include <WebServer.h>
 
-// Copyright (c) 2021-2022 Upside Down Labs - contact@upsidedownlabs.tech
-
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// WiFi credentials
+const char* ssid = "Galaxy xxx";
+const char* password = "scancheytuedukku";
 
 #define SAMPLE_RATE 200
 #define BAUD_RATE 115200
 #define INPUT_PIN A0
 #define BUFFER_SIZE 128
-#define S0 4   // D2
-#define S1 5   // D3
-#define S2 6   // D4
-int currentChannel = 0;
+#define S0 4
+#define S1 5
+#define S2 6
 
+int currentChannel = 0;
 int circular_buffer[BUFFER_SIZE];
 int data_index, sum;
 
+// Latest computed values — Flask reads these
+volatile int latest_signal = 0;
+volatile int latest_envelop = 0;
+
+WebServer server(80);  // ESP32 HTTP server on port 80
+
+// ----------------------------------------------------------------
+// HTTP HANDLERS
+// ----------------------------------------------------------------
+
+// Flask GETs this to fetch the latest EMG sample
+void handleData() {
+  String json = "{\"raw\":" + String(latest_signal) +
+                ",\"env\":" + String(latest_envelop) + "}";
+  server.send(200, "application/json", json);
+}
+
+// Flask GETs this to switch the MUX channel
+void handleSetChannel() {
+  if (server.hasArg("ch")) {
+    int ch = server.arg("ch").toInt();
+    if (ch >= 0 && ch <= 3) {
+      currentChannel = ch;
+      setChannel(ch);
+      server.send(200, "application/json",
+                  "{\"message\":\"Channel set to " + String(ch) + "\"}");
+      Serial.print("Channel switched to: ");
+      Serial.println(ch);
+    } else {
+      server.send(400, "application/json", "{\"error\":\"Invalid channel\"}");
+    }
+  } else {
+    server.send(400, "application/json", "{\"error\":\"Missing ch param\"}");
+  }
+}
+
+// Simple health check
+void handlePing() {
+  server.send(200, "application/json", "{\"status\":\"ok\"}");
+}
+
+// ----------------------------------------------------------------
 void setup() {
-	// Serial connection begin
-	Serial.begin(BAUD_RATE);
+  Serial.begin(BAUD_RATE);
   pinMode(S0, OUTPUT);
   pinMode(S1, OUTPUT);
   pinMode(S2, OUTPUT);
+
+  // Connect to WiFi
+  WiFi.begin(ssid, password);
+  Serial.print("Connecting to WiFi...");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nConnected!");
+  Serial.print("ESP32 IP Address: ");
+  Serial.println(WiFi.localIP());  // <-- NOTE THIS IP, put it in Flask
+
+  // Register endpoints
+  server.on("/data", HTTP_GET, handleData);
+  server.on("/set_channel", HTTP_GET, handleSetChannel);
+  server.on("/ping", HTTP_GET, handlePing);
+  server.begin();
+  Serial.println("HTTP server started on port 80");
+
+  setChannel(0);
 }
 
+// ----------------------------------------------------------------
 void setChannel(int ch) {
   digitalWrite(S0, ch & 1);
   digitalWrite(S1, (ch >> 1) & 1);
   digitalWrite(S2, (ch >> 2) & 1);
-
-  delayMicroseconds(200); // ONLY delay when switching
+  delayMicroseconds(200);
 }
 
+// ----------------------------------------------------------------
 void loop() {
-    if (Serial.available()) {
+  server.handleClient();  // Handle any incoming HTTP requests
+
+  // Handle serial channel switch (optional, keep for debugging)
+  if (Serial.available()) {
     String input = Serial.readStringUntil('\n');
     input.trim();
-
     int ch = input.toInt();
-
     if (ch >= 0 && ch <= 3 && ch != currentChannel) {
       currentChannel = ch;
       setChannel(currentChannel);
-
       Serial.print("Switched to channel: ");
       Serial.println(currentChannel);
     }
   }
 
-	// Calculate elapsed time
-	static unsigned long past = 0;
-	unsigned long present = micros();
-	unsigned long interval = present - past;
-	past = present;
+  // Elapsed time
+  static unsigned long past = 0;
+  unsigned long present = micros();
+  unsigned long interval = present - past;
+  past = present;
 
-	// Run timer
-	static long timer = 0;
-	timer -= interval;
+  // Timer
+  static long timer = 0;
+  timer -= interval;
 
-	// Sample and get envelop
-	if(timer < 0) {
-		timer += 1000000 / SAMPLE_RATE;
-		int sensor_value = analogRead(INPUT_PIN);
-		int signal = EMGFilter(sensor_value);
-		int envelop = getEnvelop(abs(signal));
-		Serial.print(signal);
-		Serial.print(",");
-		Serial.println(envelop);
-	}
+  if (timer < 0) {
+    timer += 1000000 / SAMPLE_RATE;
+    int sensor_value = analogRead(INPUT_PIN);
+    int signal = EMGFilter(sensor_value);
+    int envelop = getEnvelop(abs(signal));
+
+    // Update latest values for Flask to read
+    latest_signal = signal;
+    latest_envelop = envelop;
+  }
 }
 
-// Envelop detection algorithm
-int getEnvelop(int abs_emg){
-	sum -= circular_buffer[data_index];
-	sum += abs_emg;
-	circular_buffer[data_index] = abs_emg;
-	data_index = (data_index + 1) % BUFFER_SIZE;
-	return (sum/BUFFER_SIZE) * 2;
+// ----------------------------------------------------------------
+// Envelope detection
+int getEnvelop(int abs_emg) {
+  sum -= circular_buffer[data_index];
+  sum += abs_emg;
+  circular_buffer[data_index] = abs_emg;
+  data_index = (data_index + 1) % BUFFER_SIZE;
+  return (sum / BUFFER_SIZE) * 2;
 }
 
-// Band-Pass Butterworth IIR digital filter, generated using filter_gen.py.
-// Sampling rate: 200.0 Hz, frequency: [74.5, 149.5] Hz.
-// Filter is order 4, implemented as second-order sections (biquads).
-// Reference: 
-// https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.butter.html
-// https://courses.ideate.cmu.edu/16-223/f2020/Arduino/FilterDemos/filter_gen.py
-float EMGFilter(float input)
-{
+// ----------------------------------------------------------------
+// Band-Pass Butterworth IIR digital filter
+// Sampling rate: 200 Hz, frequency: [74.5, 149.5] Hz
+float EMGFilter(float input) {
   float output = input;
   {
-    static float z1, z2; // filter section state
-    float x = output - 0.05159732*z1 - 0.36347401*z2;
-    output = 0.01856301*x + 0.03712602*z1 + 0.01856301*z2;
-    z2 = z1;
-    z1 = x;
+    static float z1, z2;
+    float x = output - 0.05159732 * z1 - 0.36347401 * z2;
+    output = 0.01856301 * x + 0.03712602 * z1 + 0.01856301 * z2;
+    z2 = z1; z1 = x;
   }
   {
-    static float z1, z2; // filter section state
-    float x = output - -0.53945795*z1 - 0.39764934*z2;
-    output = 1.00000000*x + -2.00000000*z1 + 1.00000000*z2;
-    z2 = z1;
-    z1 = x;
+    static float z1, z2;
+    float x = output - -0.53945795 * z1 - 0.39764934 * z2;
+    output = 1.00000000 * x + -2.00000000 * z1 + 1.00000000 * z2;
+    z2 = z1; z1 = x;
   }
   {
-    static float z1, z2; // filter section state
-    float x = output - 0.47319594*z1 - 0.70744137*z2;
-    output = 1.00000000*x + 2.00000000*z1 + 1.00000000*z2;
-    z2 = z1;
-    z1 = x;
+    static float z1, z2;
+    float x = output - 0.47319594 * z1 - 0.70744137 * z2;
+    output = 1.00000000 * x + 2.00000000 * z1 + 1.00000000 * z2;
+    z2 = z1; z1 = x;
   }
   {
-    static float z1, z2; // filter section state
-    float x = output - -1.00211112*z1 - 0.74520226*z2;
-    output = 1.00000000*x + -2.00000000*z1 + 1.00000000*z2;
-    z2 = z1;
-    z1 = x;
+    static float z1, z2;
+    float x = output - -1.00211112 * z1 - 0.74520226 * z2;
+    output = 1.00000000 * x + -2.00000000 * z1 + 1.00000000 * z2;
+    z2 = z1; z1 = x;
   }
   return output;
 }
