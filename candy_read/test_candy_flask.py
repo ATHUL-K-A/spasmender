@@ -91,7 +91,7 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 # -------------------------------------------------
 def serial_thread():
     global ser_global
-
+    t1_state = 0
     # Open serial port
     try:
         ser_global = serial.Serial(PORT, BAUD, timeout=1)
@@ -145,14 +145,14 @@ def serial_thread():
             if fatigued:
                 fc += 1
                 print(f"Fatigue Counter: {fc} | RMS: {live_rms:.4f} | MDF: {live_mdf:.4f}")
-                t1 += 1
-            if t1:
+                t1_state = 1
+            if t1_state:
                 t1 += 1
             if t1 >= 2000:
                 print("Fatigue counter restarted — 10 seconds passed")
                 fc = 0
                 t1 = 0
-
+                t1_state = 0
             fatigue_detected = fc >= 600
             fatigue_counter_store["value"] = fc
             fatigue_counter_store["t1"]    = t1
