@@ -192,8 +192,6 @@ int getEnvelop(int abs_emg) {
 // =============================================================
 // Band-Pass Butterworth IIR Filter
 // Order 4, second-order sections | 74.5–149.5 Hz @ 200 Hz Fs
-// Generated via filter_gen.py (CMU 16-223)
-// =============================================================
 float EMGFilter(float input) {
     float output = input;
     { static float z1, z2;

@@ -12,10 +12,10 @@ from flask_socketio import SocketIO, emit
 # -------------------------------------------------
 # PARAMETERS
 # -------------------------------------------------
-ESP32_IP = "http://10.159.219.196"   # seeed studio ip
+ESP32_IP = "http://10.234.53.188"   # seeed studio ip
 
 ESP32_DATA_URL    = f"{ESP32_IP}/data"
-ESP32_CHANNEL_URL = f"{ESP32_IP}/set_channel"
+
 ESP32_PING_URL    = f"{ESP32_IP}/ping"
 
 BATCH_SIZE        = 20                        # must match BATCH_SIZE in the .ino
@@ -105,11 +105,13 @@ def poll_esp32():
 
     while not stop_event.is_set():
         loop_start = time.time()
+        print("Attempting GET /data...")  
 
         try:
             resp    = session.get(ESP32_DATA_URL, timeout=0.2)
+            print(f"Response received: {resp.status_code}")
             samples = resp.json()           # list of {raw, env} dicts
-
+            print(f"Batch: {len(samples)} samples, first={samples[0]}") 
             if not isinstance(samples, list):
                 raise ValueError("Expected a JSON array from ESP32")
 
@@ -267,15 +269,7 @@ def graph_data():
         return jsonify(list(graph_buffer))
 
 
-@app.route("/set_channel/<int:ch>", methods=["GET"])
-def set_channel(ch):
-    if ch < 0 or ch > 3:
-        return jsonify({"error": "Invalid channel"}), 400
-    try:
-        r = requests.get(f"{ESP32_CHANNEL_URL}?ch={ch}", timeout=2)
-        return jsonify(r.json())
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+
 
 # -------------------------------------------------
 # SOCKETIO EVENTS

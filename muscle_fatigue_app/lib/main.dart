@@ -117,7 +117,7 @@ class _ReadFatigueScreenState extends State<ReadFatigueScreen> {
           builder: (_) => AlertDialog(
             icon: const Icon(Icons.warning_amber_rounded,
                 color: Colors.red, size: 48),
-            title: const Text("⚠️ Fatigue Detected",
+            title: const Text(" Fatigue Detected",
                 textAlign: TextAlign.center),
             content: const Text(
               "Sustained muscle fatigue has been detected.\nPlease rest.",
