@@ -1,8 +1,6 @@
-
 // --- WiFi credentials ---
 const char* SSID     = "Spasmender";
 const char* PASSWORD = "scancheytuedukku";
-
 // =============================================================
 // EMG Signal Acquisition — Muscle BioAmp Candy
 // Upside Down Labs | https://github.com/upsidedownlabs
