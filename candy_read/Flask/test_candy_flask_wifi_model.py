@@ -24,7 +24,7 @@ POLL_INTERVAL     = BATCH_SIZE / 200.0         # 0.1 s → 10 req/s
 FS                = 200
 WINDOW            = 200
 GRAPH_BUFFER_SIZE = 200
-CSV_FILE          = r"D:\\Project\\Dataset EMG Fatigue\\candy_read\\data\\combined_BL50.csv"
+
 MODEL_PATH        = r"D:\\Project\\Dataset EMG Fatigue\\candy_read\\model_train\\svm_fatigue_model.pkl"
  
 # Threshold-based fallback parameters (used when SVM model is not available)
