@@ -12,7 +12,7 @@ from flask_socketio import SocketIO, emit
 # -------------------------------------------------
 # PARAMETERS
 # -------------------------------------------------
-ESP32_IP = "http://10.159.219.196"   # seeed studio ip
+ESP32_IP = "http://192.168.141.188"   # seeed studio ip
 
 ESP32_DATA_URL    = f"{ESP32_IP}/data"
 ESP32_CHANNEL_URL = f"{ESP32_IP}/set_channel"
