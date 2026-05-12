@@ -3,3 +3,4 @@ pyserial
 numpy
 pandas
 scipy
+joblib
