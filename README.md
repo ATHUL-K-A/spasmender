@@ -101,9 +101,9 @@ $$\text{WL} = \sum_{i=1}^{N-1} |x_{i+1} - x_i|$$
 
 | Feature | Computed On | Mathematical Unit | Typical Setup Range |
 | --- | --- | --- | --- |
-| **RMS** | Envelope | ADC counts | 50 — 500 |
+| **RMS** | Envelope | ADC counts | 0 — 700 |
 | **MAV** | Envelope | ADC counts | 40 — 400 |
-| **MDF** | Raw Signal | Hz (Hertz) | 40 — 100 |
+| **MDF** | Raw Signal | Hz (Hertz) | 40 — 60 |
 | **ZCR** | Raw Signal | Count (Dimensionless) | 20 — 120 |
 | **WL** | Raw Signal | ADC counts | 5,000 — 50,000 |
 
