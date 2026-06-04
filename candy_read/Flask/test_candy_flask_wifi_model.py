@@ -11,8 +11,8 @@ from flask_cors import CORS
 from flask_socketio import SocketIO, emit
 import joblib
 
-ESP32_IP = "http://10.132.125.188"   # normal esp32 ip
-# ESP32_IP = "http://10.132.125.193"   # seeed studio ip
+# ESP32_IP = "http://10.132.125.188"   # normal esp32 ip
+ESP32_IP = "http://10.132.125.193"   # seeed studio ip
 
 ESP32_DATA_URL    = f"{ESP32_IP}/data"
 ESP32_CHANNEL_URL = f"{ESP32_IP}/set_channel"
@@ -34,8 +34,8 @@ SVM_CONFIDENCE_THRESHOLD = 0.7
 # One model file per sensor channel — update paths to match your folder
 MODEL_PATHS = {
     0: r"D:\\Project\\Dataset EMG Fatigue\\candy_read\\model_train\svm_fatigue_model_BL.pkl",
-    1: r"D:\\Project\\Dataset EMG Fatigue\\candy_read\\model_train\svm_fatigue_model_L.pkl",
-    2: r"D:\\Project\\Dataset EMG Fatigue\\candy_read\\model_train\svm_fatigue_model_TL.pkl",
+    1: r"D:\\Project\\Dataset EMG Fatigue\\candy_read\\model_train\svm_fatigue_model_TL.pkl",
+    2: r"D:\\Project\\Dataset EMG Fatigue\\candy_read\\model_train\svm_fatigue_model_L.pkl",
     3: r"D:\\Project\\Dataset EMG Fatigue\\candy_read\\model_train\svm_fatigue_model_L2.pkl",
 }
  
