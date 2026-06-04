@@ -1,5 +1,3 @@
----
-
 # SPASMENDER
 
 SPASMENDER is a real-time surface electromyography (sEMG) data processing and muscle fatigue prediction pipeline. By recording electrical muscle activity via sEMG electrodes connected to an ESP32 micro-controller, the system extracts key time and frequency domain features to train a Support Vector Machine (SVM) classifier.
@@ -8,7 +6,7 @@ Once trained, a live Flask-based backend receives real-time streaming data over 
 
 ---
 
-## 🚀 Repository Structure & Pipeline Workflow
+##Repository Structure & Pipeline Workflow
 
 The project is cleanly divided into data generation, model training, and live deployment modules located under the `candy_read` directory:
 
@@ -48,7 +46,7 @@ A lightweight Flask backend designed for low-latency operational environments. I
 
 ---
 
-## 📊 Feature Extraction Blueprint
+##  Feature Extraction Blueprint
 
 The system extracts five core features across each sliding window of data. Because these features map entirely distinct physical dimensions—ranging from pure counts to raw frequencies—feature scaling via `StandardScaler` is explicitly embedded in the ML pipeline to prevent feature domination.
 
@@ -62,7 +60,7 @@ The system extracts five core features across each sliding window of data. Becau
 $$\text{RMS} = \sqrt{\frac{1}{N}\sum_{i=1}^{N} x_i^2}$$
 
 
-* **Unit & Range:** **ADC counts** (Typically `50 — 500`). Maps directly to the ESP32's 12-bit analog-to-digital converter ($0 - 4095$).
+* **Unit & Range:** **ADC counts** (Typically `0 — 700`). Maps directly to the ESP32's 12-bit analog-to-digital converter ($0 - 4095$).
 * *Note: To map this to absolute physical scale, multiply by $\approx 0.806\text{ mV/count}$ ($3300\text{ mV} / 4095$), though raw counts are preserved during modeling.*
 
 #### **Mean Absolute Value (MAV)**
@@ -73,19 +71,19 @@ $$\text{RMS} = \sqrt{\frac{1}{N}\sum_{i=1}^{N} x_i^2}$$
 $$\text{MAV} = \frac{1}{N}\sum_{i=1}^{N} |x_i|$$
 
 
-* **Unit & Range:** **ADC counts** (Typically `40 — 400`).
+* **Unit & Range:** **ADC counts** (Typically `0 — 600`).
 
 #### **Median Frequency (MDF)**
 
 * **Target Signal:** Raw Signal
 * **Mathematical Concept:** Calculated by executing Welch’s periodogram method to determine the Power Spectral Density (PSD). MDF points to the exact frequency threshold that divides the total power spectrum into two equal halves. As muscles tire, action potential conduction velocities slow down, causing an observable downward shift in MDF.
-* **Unit & Range:** **Hz** (Typically `40 — 100 Hz`). Rest defaults near $50\text{ Hz}$, dropping toward $47\text{ Hz}$ under severe physical fatigue conditions.
+* **Unit & Range:** **Hz** (Typically `39 — 60 Hz`). Stronger, rested contractions default toward the higher end ($60\text{ Hz}$), dropping significantly down toward the floor ($39\text{ Hz}$) under physiological fatigue conditions.
 
 #### **Zero Crossing Rate (ZCR)**
 
 * **Target Signal:** Raw Signal
 * **Mathematical Concept:** Counts the number of times the raw fluctuating waveform passes through zero, mapping high-frequency geometric changes.
-* **Unit & Range:** **Count / Dimensionless** (Typically `20 — 120` inside a 200-sample window).
+* **Unit & Range:** **Count / Dimensionless** (Typically `15 — 90` inside a 200-sample window).
 
 #### **Waveform Length (WL)**
 
@@ -95,21 +93,21 @@ $$\text{MAV} = \frac{1}{N}\sum_{i=1}^{N} |x_i|$$
 $$\text{WL} = \sum_{i=1}^{N-1} |x_{i+1} - x_i|$$
 
 
-* **Unit & Range:** **ADC counts** (Typically `5,000 — 50,000`). Because the accumulation scales values significantly higher than other parameters, standardization is absolutely mandatory before modeling.
+* **Unit & Range:** **ADC counts** (Typically `5,000 — 75,000`). Because the accumulation scales values significantly higher than other parameters, standardization is absolutely mandatory before modeling.
 
 ### Summary Metrics Reference Table
 
 | Feature | Computed On | Mathematical Unit | Typical Setup Range |
 | --- | --- | --- | --- |
 | **RMS** | Envelope | ADC counts | 0 — 700 |
-| **MAV** | Envelope | ADC counts | 40 — 400 |
-| **MDF** | Raw Signal | Hz (Hertz) | 40 — 60 |
-| **ZCR** | Raw Signal | Count (Dimensionless) | 20 — 120 |
-| **WL** | Raw Signal | ADC counts | 5,000 — 50,000 |
+| **MAV** | Envelope | ADC counts | 0 — 600 |
+| **MDF** | Raw Signal | Hz (Hertz) | 39 — 60 |
+| **ZCR** | Raw Signal | Count (Dimensionless) | 15 — 90 |
+| **WL** | Raw Signal | ADC counts | 5,000 — 75,000 |
 
 ---
 
-## 🧠 Why Support Vector Machines (SVM)?
+## Why Support Vector Machines (SVM)?
 
 The selection of a Support Vector Machine over alternative models (such as Deep Learning architectures or Neural Networks) is guided by the specific nature of sEMG signal tracking:
 
@@ -140,10 +138,10 @@ pip install numpy scipy pandas scikit-learn flask
 ### Execution Steps
 
 1. **Collect Base Data:** Run through `candy_read/read_data_to_make_dataset/read.ipynb` with your ESP32 broadcasting over the local network layer to map sEMG arrays.
-2. **Establish Labels:** Execute `candy_read/read_data_to_make_dataset/csv_label_creater.ipynb` to explicitly isolate structural changes between baseline operation and fatigue.
-3. **Synthesize Features:** Run `candy_read/read_data_to_make_dataset/feature_extract.ipynb` to parse windows and build your final aggregated training table.
-4. **Train Engine:** Execute `candy_read/model_train/train_model_svm.ipynb` to evaluate your data array and export the resulting serialized pipeline asset (`model.pkl`).
-5. **Launch Production Endpoint:** Deploy your live listener infrastructure:
+2. **Establish Labels:** Execute `candy_read/read_data_to_make_dataset/csv_label_creater.ipynb` to explicitly mention the fatigue and non fatigue datasets
+3. **Create Features:** Run `candy_read/read_data_to_make_dataset/feature_extract.ipynb` to extract features such as mav,zcr,wl in addition to rms and mdf to a new dataset
+4. **Train Model:** Execute `candy_read/model_train/train_model_svm.ipynb` to evaluate the data and train a model using svm (`model.pkl`).
+5. **Launch Flask** Deploy your live listener infrastructure:
 ```bash
 cd candy_read/Flask
 python test_candy_flask_wifi_model.py
@@ -152,6 +150,26 @@ python test_candy_flask_wifi_model.py
 
 
 
-```
+---
+
+### Flutter Application Summary
+
+The **SPASMENDER Flutter App** serves as the user-facing dashboard for the muscle fatigue monitoring system. Built using **Material 3** guidelines with a clean, responsive layout, its primary role is to provide real-time visual biometrics and controls to the user or clinician.
 
 ```
+
+![Flutter app](images\App.png)
+
+```
+
+#### Core Capabilities:
+
+* **Low-Latency Streaming:** Utilizing `socket_io_client`, the app establishes a persistent WebSocket connection directly to the Flask backend, parsing and rendering automated state updates approximately every 100ms.
+* **Dynamic Data Visualization:** Using the `fl_chart` library, the application plots continuous trends for both **Root Mean Square (RMS)** and **Median Frequency (MDF)** over a rolling time window, allowing users to visually spot the physiological shifts that occur as muscles tire.
+* **Smart Alerting:** The app features a dynamic **SVM Confidence Bar** that shifts colors (Green $\rightarrow$ Orange $\rightarrow$ Red) based on live machine learning probability scores. If sustained muscle fatigue is identified, the app triggers an immediate, unmissable `AlertDialog` to halt the session safely.
+* **Hardware & Session Control:** Through integrated REST HTTP calls (`GET` requests), users can instantly toggle the physical hardware's multiplexer channel selection via a dropdown menu, as well as initiate or terminate active sensor polling streams.
+
+---
+
+![App Fatigue Detected](images\App_Fatigue_Detected.png)
+![Circuit Diagram](images\Cad_Circuit_Diagram.png)
