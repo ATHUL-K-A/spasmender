@@ -19,7 +19,7 @@ ESP32_CHANNEL_URL = f"{ESP32_IP}/set_channel"
 ESP32_PING_URL    = f"{ESP32_IP}/ping"
 
 BATCH_SIZE        = 20                         # must match BATCH_SIZE in .ino
-POLL_INTERVAL     = BATCH_SIZE / 200.0         # 0.1 s → 10 req/s
+POLL_INTERVAL     = BATCH_SIZE / 200.0         # 0.1 s is 10 req/s
  
 FS                = 200
 WINDOW            = 200
@@ -28,7 +28,7 @@ GRAPH_BUFFER_SIZE = 200
 
  
 FATIGUE_COUNT_LIMIT = 600    # consecutive fatigued windows to confirm fatigue 3seconds
-FATIGUE_RESET_STEPS = 2000   # polling steps before resetting counter (~10 seconds) 2000ms
+FATIGUE_RESET_STEPS = 2000   # polling steps before resetting counter (10 seconds) 2000ms
 SVM_CONFIDENCE_THRESHOLD = 0.7
  
 # One model file per sensor channel — update paths to match your folder
@@ -101,12 +101,12 @@ def load_model_for_channel(ch):
     svm_model = joblib.load(path)
     print(f"Channel {ch} — SVM model loaded: {path}")
  
-# Load model for default channel 0 on startup — crashes loudly if missing
+# Load model for default channel 0 on startup — crashes if missing 
 load_model_for_channel(0)
  
-# -------------------------------------------------
+
 # SHARED STATE
-# -------------------------------------------------
+
 state_lock           = threading.Lock()
 stop_event           = threading.Event()
 poll_thread_instance = None
@@ -129,17 +129,17 @@ state = {
     "detection_mode":     "SVM"
 }
  
-# -------------------------------------------------
+
 # FLASK + SOCKETIO
-# -------------------------------------------------
+
 app = Flask(__name__)
 app.config["SECRET_KEY"] = "emg_secret"
 CORS(app)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
  
-# -------------------------------------------------
+
 # FATIGUE DETECTION — SVM only
-# -------------------------------------------------
+
 def detect_fatigue(raw_arr, env_arr):
     """
     Runs the loaded SVM model on the five extracted features.
@@ -149,10 +149,10 @@ def detect_fatigue(raw_arr, env_arr):
     fatigued = proba >= SVM_CONFIDENCE_THRESHOLD
     return fatigued, round(float(proba), 4)
  
-# -------------------------------------------------
+
 # POLLING THREAD
-# Polls ESP32 at 10 req/s; each response is a batch of 20 samples
-# -------------------------------------------------
+# Polls ESP32 at 10 req/s each response is a batch of 20 samples
+
 def poll_esp32():
     print(f"Polling ESP32 at {ESP32_DATA_URL}")
     print(f"Channel {active_channel['value']} — SVM model active")
@@ -265,9 +265,9 @@ def poll_esp32():
     socketio.emit("status_update", dict(state))
     print("Polling stopped.")
  
-# -------------------------------------------------
+
 # ROUTES
-# -------------------------------------------------
+
 @app.route("/start", methods=["GET"])
 def start():
     global poll_thread_instance
