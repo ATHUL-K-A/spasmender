@@ -6,7 +6,7 @@ Once trained, a live Flask-based backend receives real-time streaming data over 
 
 ---
 
-##Repository Structure & Pipeline Workflow
+## Repository Structure & Pipeline Workflow
 
 The project is cleanly divided into data generation, model training, and live deployment modules located under the `candy_read` directory:
 
