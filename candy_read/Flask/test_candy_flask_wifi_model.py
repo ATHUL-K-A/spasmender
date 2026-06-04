@@ -11,8 +11,8 @@ from flask_cors import CORS
 from flask_socketio import SocketIO, emit
 import joblib
 
-
-ESP32_IP = "http://10.132.125.193"   # seeed studio ip
+ESP32_IP = "http://10.132.125.188"   # normal esp32 ip
+# ESP32_IP = "http://10.132.125.193"   # seeed studio ip
 
 ESP32_DATA_URL    = f"{ESP32_IP}/data"
 ESP32_CHANNEL_URL = f"{ESP32_IP}/set_channel"
@@ -25,15 +25,19 @@ FS                = 200
 WINDOW            = 200
 GRAPH_BUFFER_SIZE = 200
 
-MODEL_PATH        = r"D:\\Project\\Dataset EMG Fatigue\\candy_read\\model_train\\svm_fatigue_model.pkl"
+
  
-# Threshold-based fallback parameters (used when SVM model is not available)
-MDF_FATIGUE_MARGIN  = 2.0    # Hz — live MDF must drop at least this far below mean_mdf
-FATIGUE_COUNT_LIMIT = 600    # consecutive fatigued windows to confirm fatigue
-FATIGUE_RESET_STEPS = 2000   # polling steps before resetting counter (~10 seconds)
- 
-# SVM confidence threshold — must exceed this to declare fatigue
+FATIGUE_COUNT_LIMIT = 600    # consecutive fatigued windows to confirm fatigue 3seconds
+FATIGUE_RESET_STEPS = 2000   # polling steps before resetting counter (~10 seconds) 2000ms
 SVM_CONFIDENCE_THRESHOLD = 0.7
+ 
+# One model file per sensor channel — update paths to match your folder
+MODEL_PATHS = {
+    0: r"D:\\Project\\Dataset EMG Fatigue\\candy_read\\model_train\svm_fatigue_model_BL.pkl",
+    1: r"D:\\Project\\Dataset EMG Fatigue\\candy_read\\model_train\svm_fatigue_model_L.pkl",
+    2: r"D:\\Project\\Dataset EMG Fatigue\\candy_read\\model_train\svm_fatigue_model_TL.pkl",
+    3: r"D:\\Project\\Dataset EMG Fatigue\\candy_read\\model_train\svm_fatigue_model_L2.pkl",
+}
  
 # -------------------------------------------------
 # FEATURE FUNCTIONS
@@ -56,8 +60,8 @@ def compute_zcr(signal):
  
 def compute_mdf(signal, fs):
     """Median Frequency via Welch PSD — frequency at which power splits equally."""
-    f, Pxx  = welch(signal, fs=fs, nperseg=len(signal))
-    cumsum  = np.cumsum(Pxx)
+    f, Pxx = welch(signal, fs=fs, nperseg=len(signal))
+    cumsum = np.cumsum(Pxx)
     return float(f[np.where(cumsum >= cumsum[-1] / 2)[0][0]])
  
 def extract_feature_vector(raw_arr, env_arr):
@@ -71,45 +75,34 @@ def extract_feature_vector(raw_arr, env_arr):
     ]])
  
 # -------------------------------------------------
-# LOAD DATASET BASELINE
-# Used for threshold-based fallback and for reporting mean values
+# PER-CHANNEL MODEL LOADING
 # -------------------------------------------------
-# df = pd.read_csv(CSV_FILE)
+active_channel = {"value": 0}
+svm_model      = None
  
-# rms_list, mdf_list = [], []
-# n_windows = (len(df) - WINDOW) // WINDOW + 1
+def load_model_for_channel(ch):
+    """
+    Loads the SVM model for the given channel.
+    Raises RuntimeError if the model file is missing or fails to load
+    so Flask refuses to start/switch without a valid model.
+    """
+    global svm_model
  
-# for w in range(n_windows):
-#     start = w * WINDOW
-#     raw   = df["Raw_EMG"].iloc[start:start + WINDOW].values
-#     env   = df["Envelope_EMG"].iloc[start:start + WINDOW].values
-#     rms_list.append(compute_rms(env))
-#     mdf_list.append(compute_mdf(raw, FS))
+    path = MODEL_PATHS.get(ch)
+    if not path:
+        raise RuntimeError(f"No model path defined for channel {ch}")
  
-# mean_rms = np.mean(rms_list)
-# mean_mdf = np.mean(mdf_list)
+    if not os.path.exists(path):
+        raise RuntimeError(
+            f"Model file not found for channel {ch}:\n  {path}\n"
+            f"Train and save the model before running Flask."
+        )
  
-# print("=== Dataset Reference Built ===")
-# print(f"  Mean RMS : {mean_rms:.4f}")
-# print(f"  Mean MDF : {mean_mdf:.4f} Hz")
+    svm_model = joblib.load(path)
+    print(f"Channel {ch} — SVM model loaded: {path}")
  
-# -------------------------------------------------
-# LOAD SVM MODEL
-# -------------------------------------------------
-svm_model    = None
-using_svm    = False
- 
-if os.path.exists(MODEL_PATH):
-    try:
-        svm_model = joblib.load(MODEL_PATH)
-        using_svm = True
-        print(f"SVM model loaded from {MODEL_PATH}")
-    except Exception as e:
-        print(f" Failed to load SVM model: {e} — falling back to threshold detection")
-else:
-    if not os.path.exists(MODEL_PATH):
-        print("ℹ No SVM model found — using threshold-based detection")
-        print(f"   Train a model and save it to: {MODEL_PATH}")
+# Load model for default channel 0 on startup — crashes loudly if missing
+load_model_for_channel(0)
  
 # -------------------------------------------------
 # SHARED STATE
@@ -129,10 +122,11 @@ state = {
     "live_mdf":           0.0,
     "fatigue_counter":    0,
     "fatigue_detected":   False,
-    "fatigue_confidence": 0.0,   # SVM probability (0.0–1.0); 0 if using threshold
+    "fatigue_confidence": 0.0,
     "status":             "STOPPED",
     "esp32_connected":    False,
-    "detection_mode":     "SVM" if using_svm else "Threshold"
+    "active_channel":     0,
+    "detection_mode":     "SVM"
 }
  
 # -------------------------------------------------
@@ -144,28 +138,24 @@ CORS(app)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
  
 # -------------------------------------------------
-# FATIGUE DETECTION LOGIC
-# Returns (fatigued: bool, confidence: float)
+# FATIGUE DETECTION — SVM only
 # -------------------------------------------------
-def detect_fatigue(raw_arr, env_arr, live_rms, live_mdf):
+def detect_fatigue(raw_arr, env_arr):
     """
-    If SVM model is loaded: uses predict_proba on 5 features.
-    Fallback: dual-threshold comparison (RMS > mean + MDF < mean - margin).
-    Returns (fatigued bool, confidence float 0-1).
+    Runs the loaded SVM model on the five extracted features.
     """
-    if using_svm and svm_model is not None:
-        features   = extract_feature_vector(raw_arr, env_arr)
-        proba      = svm_model.predict_proba(features)[0][1]  # P(fatigued)
-        fatigued   = proba >= SVM_CONFIDENCE_THRESHOLD
-        return fatigued, round(float(proba), 4)
-
+    features = extract_feature_vector(raw_arr, env_arr)
+    proba    = svm_model.predict_proba(features)[0][1]  # P(class=fatigued)
+    fatigued = proba >= SVM_CONFIDENCE_THRESHOLD
+    return fatigued, round(float(proba), 4)
+ 
 # -------------------------------------------------
 # POLLING THREAD
 # Polls ESP32 at 10 req/s; each response is a batch of 20 samples
 # -------------------------------------------------
 def poll_esp32():
     print(f"Polling ESP32 at {ESP32_DATA_URL}")
-    print(f"Detection mode: {'SVM' if using_svm else 'Threshold'}")
+    print(f"Channel {active_channel['value']} — SVM model active")
  
     session     = requests.Session()
     retry_delay = 0.5
@@ -197,22 +187,20 @@ def poll_esp32():
                     graph_buffer.append({"raw": raw_val, "env": env_val})
                 socketio.emit("emg_sample", {"raw": raw_val, "env": env_val})
  
-            # Feature computation and fatigue detection once per batch
+            # Feature computation and SVM detection once per batch
             with state_lock:
                 if len(raw_buffer) < WINDOW:
                     elapsed = time.time() - loop_start
                     time.sleep(max(0, POLL_INTERVAL - elapsed))
                     continue
  
-                raw_arr  = np.array(raw_buffer)
-                env_arr  = np.array(env_buffer)
+                raw_arr = np.array(raw_buffer)
+                env_arr = np.array(env_buffer)
  
                 live_rms = compute_rms(env_arr)
                 live_mdf = compute_mdf(raw_arr, FS)
  
-                fatigued, confidence = detect_fatigue(
-                    raw_arr, env_arr, live_rms, live_mdf
-                )
+                fatigued, confidence = detect_fatigue(raw_arr, env_arr)
  
                 fc = fatigue_counter_store["value"]
                 t1 = fatigue_counter_store["t1"]
@@ -220,8 +208,7 @@ def poll_esp32():
                 if fatigued:
                     fc += 20
                     print(
-                        f"[{'SVM' if using_svm else 'THR'}] "
-                        f"Counter: {fc} | "
+                        f"[SVM] Counter: {fc} | "
                         f"RMS: {live_rms:.4f} | "
                         f"MDF: {live_mdf:.2f} Hz | "
                         f"Conf: {confidence:.2%}"
@@ -343,20 +330,49 @@ def graph_data():
 def set_channel(ch):
     if ch < 0 or ch > 3:
         return jsonify({"error": "Invalid channel"}), 400
+ 
+    # Tell ESP32 to switch MUX channel
     try:
-        r = requests.get(f"{ESP32_CHANNEL_URL}?ch={ch}", timeout=2)
-        return jsonify(r.json())
+        requests.get(f"{ESP32_CHANNEL_URL}?ch={ch}", timeout=2)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+ 
+    # Load the SVM model for the new channel — returns 503 if model missing
+    try:
+        load_model_for_channel(ch)
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 503
+ 
+    active_channel["value"] = ch
+ 
+    # Reset buffers so old channel data does not bleed into new channel
+    with state_lock:
+        raw_buffer.clear()
+        env_buffer.clear()
+        graph_buffer.clear()
+        fatigue_counter_store["value"] = 0
+        fatigue_counter_store["t1"]    = 0
+        state["fatigue_counter"]       = 0
+        state["fatigue_confidence"]    = 0.0
+        state["active_channel"]        = ch
+ 
+    socketio.emit("status_update", dict(state))
+    print(f"Channel switched to {ch} — SVM model loaded")
+    return jsonify({"message": f"Channel set to {ch}", "detection_mode": "SVM"})
  
  
 @app.route("/info", methods=["GET"])
 def info():
     """Returns system info — useful for debugging from browser."""
+    channel_models = {
+        str(ch): "available" if os.path.exists(p) else "missing"
+        for ch, p in MODEL_PATHS.items()
+    }
     return jsonify({
-        "detection_mode": "SVM" if using_svm else "Threshold",
-        "svm_threshold":   SVM_CONFIDENCE_THRESHOLD if using_svm else None,
-        "mdf_margin":      MDF_FATIGUE_MARGIN if not using_svm else None,
+        "detection_mode":  "SVM",
+        "active_channel":  active_channel["value"],
+        "channel_models":  channel_models,
+        "svm_threshold":   SVM_CONFIDENCE_THRESHOLD,
         "batch_size":      BATCH_SIZE,
         "window":          WINDOW,
         "fs":              FS,
@@ -382,4 +398,3 @@ def on_disconnect():
 # -------------------------------------------------
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5000, debug=False, use_reloader=False)
- 
