@@ -158,7 +158,7 @@ The **SPASMENDER Flutter App** serves as the user-facing dashboard for the muscl
 
 ```
 
-![Flutter app](images\App.png)
+![Flutter app](images/App.png)
 
 ```
 
@@ -171,5 +171,5 @@ The **SPASMENDER Flutter App** serves as the user-facing dashboard for the muscl
 
 ---
 
-![App Fatigue Detected](images\App_Fatigue_Detected.png)
-![Circuit Diagram](images\Cad_Circuit_Diagram.png)
+![App Fatigue Detected](images/App_Fatigue_Detected.png)
+![Circuit Diagram](images/Cad_Circuit_Diagram.png)
