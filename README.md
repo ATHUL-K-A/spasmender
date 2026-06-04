@@ -118,7 +118,7 @@ The selection of a Support Vector Machine over alternative models (such as Deep 
 
 ---
 
-## 🛠️ Setup and Installation
+## Setup and Installation
 
 ### Prerequisites
 
