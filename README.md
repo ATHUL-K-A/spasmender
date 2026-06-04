@@ -170,6 +170,9 @@ The **SPASMENDER Flutter App** serves as the user-facing dashboard for the muscl
 * **Hardware & Session Control:** Through integrated REST HTTP calls (`GET` requests), users can instantly toggle the physical hardware's multiplexer channel selection via a dropdown menu, as well as initiate or terminate active sensor polling streams.
 
 ---
-
+## Fatigue Detected
 ![App Fatigue Detected](images/App_Fatigue_Detected.png)
+
+---
+## Circuit Diagram
 ![Circuit Diagram](images/Cad_Circuit_Diagram.png)
