@@ -156,11 +156,11 @@ python test_candy_flask_wifi_model.py
 
 The **SPASMENDER Flutter App** serves as the user-facing dashboard for the muscle fatigue monitoring system. Built using **Material 3** guidelines with a clean, responsive layout, its primary role is to provide real-time visual biometrics and controls to the user or clinician.
 
-```
+
 
 ![Flutter app](images/App.png)
 
-```
+
 
 #### Core Capabilities:
 
